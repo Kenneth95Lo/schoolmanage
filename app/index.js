@@ -129,7 +129,7 @@ app.post("/api/suspend", (req, res) => {
 });
 
 app.post("/api/retrievefornotifications", (req, res) => {
-    
+
 	let { notification, teacher } = req.body;
 
 	if (notification == undefined || teacher == undefined) {
@@ -233,6 +233,7 @@ const responseHandler = (error, results, api, res) => {
 	}
 };
 
-app.listen(3000, () => {
-	console.log("Server started on port 3000");
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+	console.log(`Server is running on port ${PORT}.`);
 });
