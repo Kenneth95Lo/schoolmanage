@@ -178,3 +178,6 @@ When non existing email is in the request body/ query, it will returns 400 with 
 
 ## Tests
 Testing is done with Mocha Chai, the test cases can be found under test/ folder
+
+## Postman Collection
+https://www.getpostman.com/collections/6607828f591030c3d5f5
