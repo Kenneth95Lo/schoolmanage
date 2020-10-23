@@ -1,280 +1,238 @@
-const express = require('express');
-const bodyParser = require('body-parser');
+const express = require("express");
+const bodyParser = require("body-parser");
 const app = express();
-const mysql = require('mysql');
-const { throws, match } = require('assert');
-const DBConf = require('./config/DB.js');
+const mysql = require("mysql");
+const { throws, match } = require("assert");
+const DBConf = require("./config/DB.js");
+const genFunc = require("./functions/GeneralFunctions.js");
+const SqlGenerator = require('./functions/SqlGenerator.js');
+const { response } = require("express");
 
 app.use(bodyParser.json());
 
 const conn = mysql.createConnection({
-    host:DBConf.HOST,
-    user:DBConf.USER,
-    port:DBConf.PORT,
-    password:DBConf.PASSWORD,
-    database:DBConf.DATABASE,
-    multipleStatements:true
+	host: DBConf.HOST,
+	user: DBConf.USER,
+	port: DBConf.PORT,
+	password: DBConf.PASSWORD,
+	database: DBConf.DATABASE,
+	multipleStatements: true,
 });
 
-conn.connect((error)=>{
-    if(error) throw error;
-    console.log("mysql connected");
+conn.connect((error) => {
+	if (error) throw error;
+	console.log("mysql connected");
 });
 
-var emailRegex = /([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9_-]+)/;
 var mentionRegex = /@([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9_-]+)/gi;
-
-function isEmailValid (inputEmails){
-
-    let valid = true;
-    let errorMsg = '';
-
-    for (const email of inputEmails) {
-        
-        let tmpValid = emailRegex.test(email);
-        if(!tmpValid){
-            errorMsg = "Invalid email format for: ["+ email +"]";
-            valid = false;
-            break;
-        }
-        valid &= tmpValid;
-    }
-
-    return {
-        valid:valid,
-        errorMsg:errorMsg
-    };
-
-}
-
-function respFormatter (hasError,errorMsg,resultObj={}) {
-    return {
-        error:hasError,
-        errorMsg:errorMsg,
-        ...resultObj
-    }
-}
+const sqlGenerator = new SqlGenerator();
 
 //register students to a teacher
-app.post('/api/register',(req,res)=>{
+app.post("/api/register", (req, res) => {
+	let httpStatus = 204;
 
-    if(!req.body){
-        res.status(400).json(respFormatter(true,'Body cannot be empty'));
-        return;
-    }
+	let { teacher, students } = req.body;
 
-    let httpStatus = 204;
+	if (teacher == undefined || students == undefined) {
+		res
+			.status(400)
+			.json(
+				genFunc.errorRespFormatter(true, "Must have teacher and student(s)")
+			);
+		return;
+	}
 
-    let {teacher,students} = req.body;
+	if (Array.isArray(teacher)) {
+		res
+			.status(400)
+			.json(
+				genFunc.errorRespFormatter(true, "More than 1 teacher is not supported")
+			);
+		return;
+	}
 
-    if(teacher==undefined || students==undefined){
-        res.status(400).json(respFormatter(true,'Must have teacher and student(s)'));
-        return;
-    }
+	let emailCheckResp = genFunc.isEmailValid([teacher, ...students]);
+	if (!emailCheckResp.valid) {
+		res
+			.status(400)
+			.json(genFunc.errorRespFormatter(true, emailCheckResp.errorMsg));
+		return;
+	}
 
-    if(Array.isArray(teacher)){
-        res.status(400).json(respFormatter(true,'More than 1 teacher is not supported'));
-        return;
-    }
+	let arrArg = [];
 
-    let emailCheckResp = isEmailValid([teacher, ...students]);
-    if (!emailCheckResp.valid) {
-      res.status(400).json(respFormatter(true, emailCheckResp.errorMsg));
-      return;
-    }
+	let sql = sqlGenerator.generateSql('register',{numOfRep:students.length});
 
-    let teacherEmail = teacher;
-    let studentsArr = students;
-    let arrArg = [];
+	for (const student of students) {
+		arrArg = arrArg.concat(teacher, student, teacher, student);
+	}
 
-    let sql = "";
-
-    for (const student of studentsArr) {
-      sql += "INSERT INTO teacher_student (teacher_id,student_id) SELECT * FROM (SELECT (SELECT teacher_id FROM teacher WHERE teacher_email LIKE ?),(SELECT student_id FROM student WHERE student_email LIKE ?)) AS tmp WHERE NOT EXISTS (SELECT teacher_id FROM teacher_student WHERE teacher_id=(SELECT teacher_id FROM teacher WHERE teacher_email LIKE ?) AND student_id=(SELECT student_id FROM student WHERE student_email LIKE ?)) LIMIT 1;";
-      arrArg = arrArg.concat(teacherEmail, student, teacherEmail, student);
-    }
-
-    let query = conn.query(sql,arrArg,(error, results) => {
-        if (error) throw error;
-        res.status(httpStatus).send();
-      }
-    );
-
+	let query = conn.query(sql, arrArg, (error, results) =>responseHandler(error, results, "register", res));
 });
 
-
 app.get("/api/commonstudents", (req, res) => {
+	let params = req.query;
+	let { teacher } = params;
 
-    let params = req.query;
-    let {teacher} = params;
-    
-    if(!teacher){
-        res.status(400).send({
-            error:true,
-            errorMsg:"teacher query cannot be empty"
-        })
-        return;
-    }
-    
+	if (!teacher) {
+		res.status(400).send({
+			error: true,
+			errorMsg: "teacher query cannot be empty",
+		});
+		return;
+	}
 
-    let emailCheckResp = isEmailValid(Array.isArray(teacher) ? teacher : [teacher]);
-    if(!emailCheckResp.valid){
-        res.status(400).send({
-          error: true,
-          errorMsg: emailCheckResp.errorMsg,
-        });
-        return;
-    }
+    //check if teacher is an array
+    let isMoreThanOne = Array.isArray(teacher);
+	let emailCheckResp = genFunc.isEmailValid(
+		isMoreThanOne ? teacher : [teacher]
+	);
+	if (!emailCheckResp.valid) {
+		res.status(400).send({
+			error: true,
+			errorMsg: emailCheckResp.errorMsg,
+		});
+		return;
+	}
 
-    let sql =
-      "SELECT DISTINCT s.student_email FROM teacher_student ts JOIN teacher t ON t.teacher_id=ts.teacher_id JOIN student s ON s.student_id=ts.student_id WHERE ts.status=1 AND t.teacher_email IN (?)";
-    
-    if(Array.isArray(teacher)){
-        sql += "GROUP BY ts.student_id HAVING (count(ts.student_id)="+teacher.length.toString()+");";
-    }
+	let sql = sqlGenerator.generateSql("commonstudents",{isMoreThanOne:isMoreThanOne,arrLength:isMoreThanOne ? teacher.length : 1});
 
-    // res.json({
-    //     sql:sql,
-    //     teacherArr:teacher
-    // });
-    // return;
-
-    let query = conn.query(sql,[teacher],(error, results) => {
-        if (error) throw error;
-
-        let httpStatus = 200;
-        let errorMsg = '';
-        if(results.length===0){
-            httpStatus=404;
-            errorMsg = "No match found";
-        }else{
-            results = results.map(obj=>{
-                return obj.student_email;
-            });
-        }
-
-        if(httpStatus===404){
-            res.status(httpStatus).json(respFormatter(httpStatus===404,errorMsg,{students:results}));
-        }else{
-            res.status(200).json({students:results});
-        }
-        
-    });
+	let query = conn.query(sql, [teacher], (error, results) =>responseHandler(error, results, "commonstudents", res));
 });
 
 //suspend student
-app.post('/api/suspend',(req,res)=>{
+app.post("/api/suspend", (req, res) => {
+	let { student } = req.body;
+	let hasError = false;
+	let errorMsg = "";
 
-    let {student} = req.body;
-    let hasError = false;
-    let errorMsg = '';
-    let httpStatus = 204;
+	if (student == undefined || student === "") {
+		res
+			.status(400)
+			.json(genFunc.errorRespFormatter(true, "Student cannot be empty"));
+	}
 
-    if(student==undefined || student===''){
-        res.status(400).json(respFormatter(true,'Student cannot be empty'));
-    }
-    
-    let emailCheckResp = isEmailValid([student]);
-    if(!emailCheckResp.valid){
-        hasError = true;
-        errorMsg = emailCheckResp.errorMsg,
-        httpStatus = 400;
-    }
+	let emailCheckResp = genFunc.isEmailValid([student]);
+	if (!emailCheckResp.valid) {
+		hasError = true;
+		(errorMsg = emailCheckResp.errorMsg), (httpStatus = 400);
+	}
 
-    if(hasError){
-        res.status(httpStatus).send({
-            error:hasError,
-            errorMsg:errorMsg
-        });
-        return;
-    }
+	if (hasError) {
+		res.status(httpStatus).json(genFunc.errorRespFormatter(hasError, errorMsg));
+		return;
+	}
 
-    let sql =
-      "UPDATE student SET suspended=1 WHERE student_email LIKE ? ; UPDATE teacher_student SET status=0 WHERE student_id=(SELECT student_id FROM student WHERE student_email LIKE ?)";
+	let sql = sqlGenerator.generateSql('suspend');
 
-    let query = conn.query(sql,[student,student],(err,results)=>{
-        if (err) throw err;
-        if(results){
-            res.status(204).send();
-            // res.json(results);
-        }
-    });
-
+	let query = conn.query(sql, [student, student], (err, results) =>responseHandler(err, results, "suspend", res));
 });
 
-app.post("/api/retrievefornotifications",(req,res)=>{
-
-
-    let {notification,teacher} = req.body;
-
-    //check for null here
-    if(notification==undefined || teacher==undefined){
-        res.status(400).json(respFormatter(true,'Must have teacher & notification'));
-        return;
-    }
-
-    if(Array.isArray(teacher)){
-        res.status(400).json(respFormatter(true,'Multiple teachers not supported'));
-        return;
-    }
-
-    let matches = notification.match(mentionRegex);
+app.post("/api/retrievefornotifications", (req, res) => {
     
-    if(matches && matches.length>0){
-        matches = matches.map((emailWithTag) => {
-          return emailWithTag.substring(1);
-        });
-    }else{
-        matches = [];
-    }
+	let { notification, teacher } = req.body;
 
-    let emailCheckResp = isEmailValid(matches.length>0 ? [teacher,...matches] : [teacher]);
-    if (!emailCheckResp.valid) {
-        res.status(400).json(respFormatter(true,emailCheckResp.errorMsg));
-        return;
-    }
-    
-    // res.json({
-    //     matches:matches
-    // });
-    // return;
+	if (notification == undefined || teacher == undefined) {
+		res
+			.status(400)
+			.json(
+				genFunc.errorRespFormatter(true, "Must have teacher & notification")
+			);
+		return;
+	}
 
-    let sql = "SELECT * FROM (SELECT DISTINCT s.student_email FROM teacher_student ts JOIN teacher t ON t.teacher_id=ts.teacher_id JOIN student s ON s.student_id=ts.student_id WHERE ts.status=1 AND t.teacher_email LIKE ?";
+	if (Array.isArray(teacher)) {
+		res
+			.status(400)
+			.json(
+				genFunc.errorRespFormatter(true, "Multiple teachers not supported")
+			);
+		return;
+	}
 
-    if (matches && matches.length>0) {
-        sql += " UNION SELECT DISTINCT student_email FROM student WHERE suspended=0 AND student_email IN (?))";
-    }else{
-        sql += ")";
-    }
+    //check if any tag in the notication string
+	let matches = notification.match(mentionRegex);
 
-    sql += " AS temp WHERE (SELECT COUNT(*) FROM teacher WHERE teacher_email LIKE ?)>0";
-    
-    let arrQueryOption = matches.length>0 ? [teacher, matches,teacher] : [teacher,teacher];
+    let hasMatches = false;
+	if (matches && matches.length > 0) {
+        hasMatches = true;
+		matches = matches.map((emailWithTag) => {
+			return emailWithTag.substring(1);
+		});
+	} else {
+		matches = [];
+	}
 
-    let query = conn.query(sql,arrQueryOption,(err,results)=>{
-        if (err) throw err;
+	let emailCheckResp = genFunc.isEmailValid(
+		hasMatches ? [teacher, ...matches] : [teacher]
+	);
+	if (!emailCheckResp.valid) {
+		res
+			.status(400)
+			.json(genFunc.errorRespFormatter(true, emailCheckResp.errorMsg));
+		return;
+	}
 
-        let httpStatus = 200;
-        let errorMsg = "";
-        let hasError = false;
-        
-        if (results.length === 0) {
-            res.status(404).json(respFormatter(false,"No match found"));
-            return;
-        } else {
-            results = results.map((obj) => {
-                return obj.student_email;
-            });
-        }
+	let sql = sqlGenerator.generateSql("retrievefornotifications",{hasTags:matches.length>0});
 
-        res.status(httpStatus).json({
-            students: results,
-        });
-    });
+	let arrQueryOption =
+		hasMatches ? [teacher, matches, teacher] : [teacher, teacher];
 
-
+	let query = conn.query(sql, arrQueryOption, (err, results) =>responseHandler(err, results, "retrievefornotifications", res));
 });
 
-app.listen(3000,()=>{
-    console.log('Server started on port 3000');
+const responseHandler = (error, results, api, res) => {
+	if (error) {
+		res.sendStatus(500);
+		return;
+	}
+
+	let httpStatus = 200;
+	let errorMsg = "";
+	let hasError = false;
+
+	if (api === "register") {
+		if (results) {
+			res.sendStatus(204);
+		}
+	} else if (api === "commonstudents") {
+		if (results.length === 0) {
+			httpStatus = 404;
+			errorMsg = "No match found";
+			hasError = true;
+		} else {
+			results = results.map((obj) => {
+				return obj.student_email;
+			});
+		}
+
+		if (hasError) {
+			res
+				.status(httpStatus)
+				.json(genFunc.errorRespFormatter(httpStatus, errorMsg));
+		} else {
+			res.status(200).json({ students: results });
+		}
+
+		return;
+	} else if (api === "suspend") {
+		if (results) {
+			res.sendStatus(204);
+		}
+	} else if (api === "retrievefornotifications") {
+		if (results.length === 0) {
+			res.status(404).json(genFunc.errorRespFormatter(false, "No match found"));
+			return;
+		} else {
+			results = results.map((obj) => {
+				return obj.student_email;
+			});
+		}
+
+		res.status(httpStatus).json({ students: results });
+	}
+};
+
+app.listen(3000, () => {
+	console.log("Server started on port 3000");
 });
