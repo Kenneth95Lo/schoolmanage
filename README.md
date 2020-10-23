@@ -2,6 +2,10 @@
 
 ## API SETUP
 
+LOCAL ENV:
+http://localhost:3000/
+
+ONLINE ENV:
 HOST:
 https://school-managee.herokuapp.com/
 
@@ -107,7 +111,10 @@ HTTP Status: 204
 
 ### 4.RETRIEVE NOTIFICATIONS
 
-Notes: When student (even being @mentioned) is not suspended, it will show in the results.
+Notes:
+When student (even being @mentioned) is not suspended, it will show in the results.
+Will capture email only when mentioned with '@'
+
 
 API Endpoint:
 `api/retrievefornotifications`
@@ -156,5 +163,15 @@ HTTP Status: 400
 {
     "error": true,
     "errorMsg": "Invalid email format for: [jimmail.com]"
+}
+```
+
+### NON-EXISTING EMAIL IN REQUEST BODY/ QUERY
+
+When non existing email is in the request body/ query, it will returns 400 with "student/teacher does not exist" error.
+```
+{
+    "error": true,
+    "errorMsg": "Student does not exist"
 }
 ```
