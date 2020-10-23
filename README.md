@@ -175,3 +175,6 @@ When non existing email is in the request body/ query, it will returns 400 with 
     "errorMsg": "Student does not exist"
 }
 ```
+
+## Tests
+Testing is done with Mocha Chai, the test cases can be found under test/ folder
