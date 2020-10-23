@@ -190,7 +190,7 @@ describe("api/retrievefornotifications",()=>{
             notification: "Hello guys @queen@mail.com",
           })
           .end((err, res) => {
-            expect(res.status).to.be.equal(400);
+            expect(res.status).to.be.equal(404);
             expect(res.body).to.have.keys('error','errorMsg');
             done();
           });

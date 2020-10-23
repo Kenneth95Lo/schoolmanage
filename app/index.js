@@ -290,7 +290,8 @@ const responseHandler = (error, results, api, res) => {
 		if (hasError) {
 			res
 				.status(httpStatus)
-				.json(genFunc.errorRespFormatter(httpStatus, errorMsg));
+                .json(genFunc.errorRespFormatter(httpStatus, errorMsg));
+            return;
 		} else {
 			res.status(200).json({ students: results });
 		}

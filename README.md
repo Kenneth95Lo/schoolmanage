@@ -2,7 +2,8 @@
 
 ## API SETUP
 
-HOST: 
+HOST:
+https://school-managee.herokuapp.com/
 
 ## APIs
 The 4 APIs are for
