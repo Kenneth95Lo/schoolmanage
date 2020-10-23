@@ -27,6 +27,10 @@ conn.connect((error) => {
 var mentionRegex = /@([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9_-]+)/gi;
 const sqlGenerator = new SqlGenerator();
 
+app.get("/",()=>{
+    res.send('Hello, there');
+});
+
 //register students to a teacher
 app.post("/api/register", (req, res) => {
 	let httpStatus = 204;
