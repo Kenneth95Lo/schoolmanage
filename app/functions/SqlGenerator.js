@@ -44,7 +44,21 @@ module.exports = class SqlGenerator{
             }
 
         }else if(api==='suspend'){
+
             sql = "UPDATE student SET suspended=1 WHERE student_email LIKE ? ; UPDATE teacher_student SET status=0 WHERE student_id=(SELECT student_id FROM student WHERE student_email LIKE ?)";
+
+        }else if(api==='checkexist'){
+
+            let {tablename,columnname} = params;
+
+            sql = "SELECT COUNT(*) AS headCount FROM (SELECT * FROM "+tablename+" WHERE "+columnname+" IN (?)) AS tmp";
+
+        }else if(api==='checkexistunion'){
+
+            let { hasTags } = params;
+
+            sql = "SELECT COUNT(*) AS headCount FROM (SELECT teacher_id AS id FROM teacher WHERE teacher_email IN (?) UNION SELECT student_id AS id FROM student WHERE student_email IN (?)) AS tmp";
+
         }
 
         return sql;

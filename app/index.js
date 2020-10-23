@@ -7,6 +7,7 @@ const DBConf = require("./config/DB.js");
 const genFunc = require("./functions/GeneralFunctions.js");
 const SqlGenerator = require('./functions/SqlGenerator.js');
 const { response } = require("express");
+const { resolve } = require("path");
 
 app.use(bodyParser.json());
 
@@ -31,8 +32,27 @@ app.get("/",(req,res)=>{
     res.send('Hello, there');
 });
 
+let checkExist = (emails,role,extraInfo=null) => {
+
+    let params = {};
+    if(role==='teacher'){
+        params = {tablename:'teacher',columnname:'teacher_email'};
+    }else if(role==='student'){
+        params = { tablename: "student", columnname: "student_email" };
+    }else{
+        params = {...extraInfo}
+    }
+    
+    return new Promise(resolve=>{
+        let sql = sqlGenerator.generateSql((role==='teacher' || role==='student') ? "checkexist" : "checkexistunion",params);
+        conn.query(sql, role==='all' ? emails : [emails], (error, results) => {
+            resolve(results);
+        });
+    });
+}
+
 //register students to a teacher
-app.post("/api/register", (req, res) => {
+app.post("/api/register", async (req, res) => {
 	let httpStatus = 204;
 
 	let { teacher, students } = req.body;
@@ -61,7 +81,18 @@ app.post("/api/register", (req, res) => {
 			.status(400)
 			.json(genFunc.errorRespFormatter(true, emailCheckResp.errorMsg));
 		return;
-	}
+    }
+    
+    let arrToUse = [teacher, ...students];
+    //check if any of the email exist
+    let checkAllExist = await checkExist([[teacher], students],'all',);
+
+    if (checkAllExist===undefined || checkAllExist[0].headCount < arrToUse.length) {
+        res
+			.status(400)
+			.json(genFunc.errorRespFormatter(true, 'One or more user does not exist'));
+		return;
+    }
 
 	let arrArg = [];
 
@@ -74,38 +105,53 @@ app.post("/api/register", (req, res) => {
 	let query = conn.query(sql, arrArg, (error, results) =>responseHandler(error, results, "register", res));
 });
 
-app.get("/api/commonstudents", (req, res) => {
+app.get("/api/commonstudents", async (req, res) => {
 	let params = req.query;
 	let { teacher } = params;
 
-	if (!teacher) {
+	if (teacher==undefined) {
 		res.status(400).send({
 			error: true,
 			errorMsg: "teacher query cannot be empty",
 		});
 		return;
-	}
+    }
+    
+    let arrToUse = [];
 
     //check if teacher is an array
     let isMoreThanOne = Array.isArray(teacher);
-	let emailCheckResp = genFunc.isEmailValid(
-		isMoreThanOne ? teacher : [teacher]
-	);
+
+    if(isMoreThanOne){
+        arrToUse = teacher;
+    }else{
+        arrToUse = [teacher];
+    }
+
+	let emailCheckResp = genFunc.isEmailValid(arrToUse);
 	if (!emailCheckResp.valid) {
 		res.status(400).send({
 			error: true,
 			errorMsg: emailCheckResp.errorMsg,
 		});
 		return;
-	}
+    }
+    
+    //check if it's an existing teacher in DB
+    let checkTeacherExist = await checkExist(arrToUse,'teacher');
+    if(checkTeacherExist===undefined || checkTeacherExist[0].headCount<arrToUse.length){
+        res.status(400).json(genFunc.errorRespFormatter(true,'Teacher(s) does not exist'));
+        return;
+    }
 
-	let sql = sqlGenerator.generateSql("commonstudents",{isMoreThanOne:isMoreThanOne,arrLength:isMoreThanOne ? teacher.length : 1});
+	let sql = sqlGenerator.generateSql("commonstudents",{isMoreThanOne:isMoreThanOne,arrLength:arrToUse.length});
 
 	let query = conn.query(sql, [teacher], (error, results) =>responseHandler(error, results, "commonstudents", res));
 });
 
 //suspend student
-app.post("/api/suspend", (req, res) => {
+app.post("/api/suspend", async (req, res) => {
+
 	let { student } = req.body;
 	let hasError = false;
 	let errorMsg = "";
@@ -113,7 +159,8 @@ app.post("/api/suspend", (req, res) => {
 	if (student == undefined || student === "") {
 		res
 			.status(400)
-			.json(genFunc.errorRespFormatter(true, "Student cannot be empty"));
+            .json(genFunc.errorRespFormatter(true, "Student cannot be empty"));
+        return;
 	}
 
 	let emailCheckResp = genFunc.isEmailValid([student]);
@@ -122,8 +169,14 @@ app.post("/api/suspend", (req, res) => {
 		(errorMsg = emailCheckResp.errorMsg), (httpStatus = 400);
 	}
 
+    let checkStudentExist = await checkExist([student],'student');
+    if (checkStudentExist===undefined || checkStudentExist[0].headCount < 1) {
+        hasError = true;
+        errorMsg = "Student does not exist";
+    }
+
 	if (hasError) {
-		res.status(httpStatus).json(genFunc.errorRespFormatter(hasError, errorMsg));
+		res.status(400).json(genFunc.errorRespFormatter(hasError, errorMsg));
 		return;
 	}
 
@@ -132,7 +185,7 @@ app.post("/api/suspend", (req, res) => {
 	let query = conn.query(sql, [student, student], (err, results) =>responseHandler(err, results, "suspend", res));
 });
 
-app.post("/api/retrievefornotifications", (req, res) => {
+app.post("/api/retrievefornotifications", async (req, res) => {
 
 	let { notification, teacher } = req.body;
 
@@ -175,7 +228,19 @@ app.post("/api/retrievefornotifications", (req, res) => {
 			.status(400)
 			.json(genFunc.errorRespFormatter(true, emailCheckResp.errorMsg));
 		return;
-	}
+    }
+    
+    let arrToUse = hasMatches ? [teacher, ...matches] : [teacher];
+
+    //check if any of the email exist
+    let checkAllExist = await checkExist(hasMatches ? [[teacher], matches] : [teacher],hasMatches ? 'all' : 'teacher');
+
+    if (checkAllExist===undefined || checkAllExist[0].headCount < arrToUse.length) {
+        res
+			.status(400)
+			.json(genFunc.errorRespFormatter(true, 'One or more user does not exist'));
+		return;
+    }
 
 	let sql = sqlGenerator.generateSql("retrievefornotifications",{hasTags:matches.length>0});
 
@@ -184,6 +249,18 @@ app.post("/api/retrievefornotifications", (req, res) => {
 
 	let query = conn.query(sql, arrQueryOption, (err, results) =>responseHandler(err, results, "retrievefornotifications", res));
 });
+
+// app.get('/api/:role/exist',(req,res)=>{
+
+//     let {role} = req.params;
+
+//     if(role==='teacher'){
+
+//     }else 
+
+//     checkTeacherExist(req.query.teacher,res);
+    
+// });
 
 const responseHandler = (error, results, api, res) => {
 	if (error) {
